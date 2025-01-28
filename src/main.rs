@@ -1,3 +1,5 @@
+use wgpuproj1::run;
+
 fn main() {
-    println!("wgpu project");
+    run();
 }
