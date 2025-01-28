@@ -1,0 +1,14 @@
+[package]
+name = "wgpuproj1"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "wgpuapp"
+path = "src/main.rs"
+
+[dependencies]
+env_logger = "0.11.5"
+log = "0.4.22"
+wgpu = "22.1.0"
+winit = { version = "0.29", features = ["rwh_05"] }
