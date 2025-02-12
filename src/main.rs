@@ -1,5 +1,5 @@
 use wgpuproj1::run;
 
 fn main() {
-    run();
+    pollster::block_on(run());
 }
