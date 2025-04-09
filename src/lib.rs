@@ -1,3 +1,4 @@
+use glam::Vec3;
 use std::iter;
 use wgpu::util::DeviceExt;
 use winit::{
@@ -14,24 +15,31 @@ use wasm_bindgen::prelude::*;
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vert {
-    pos: [f32; 3],
-    color: [f32; 3],
+    pos: Vec3,
+    color: Vec3,
 }
 
 const VERTS: &[Vert] = &[
     Vert {
-        pos: [0.0, 0.5, 0.0],
-        color: [1.0, 0.0, 0.0],
+        pos: Vec3::new(0.5, 0.5, 0.0),
+        color: Vec3::new(1.0, 0.0, 0.0),
     },
     Vert {
-        pos: [-0.5, -0.5, 0.0],
-        color: [0.0, 1.0, 0.0],
+        pos: Vec3::new(0.5, -0.5, 0.0),
+        color: Vec3::new(0.0, 0.0, 1.0),
     },
     Vert {
-        pos: [0.5, -0.5, 0.0],
-        color: [0.0, 0.0, 1.0],
+        pos: Vec3::new(-0.5, -0.5, 0.0),
+        color: Vec3::new(0.0, 1.0, 0.0),
+    },
+    Vert {
+        pos: Vec3::new(-0.5, 0.5, 0.0),
+        color: Vec3::new(1.0, 1.0, 0.0),
     },
 ];
+
+//const INDICES: &[u16] = &[0, 1, 3, 1, 2, 3];
+const INDICES: &[u16] = &[3, 2, 1, 3, 1, 0];
 
 impl Vert {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -45,7 +53,7 @@ impl Vert {
                     format: wgpu::VertexFormat::Float32x3,
                 },
                 wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    offset: std::mem::size_of::<Vec3>() as wgpu::BufferAddress,
                     shader_location: 1,
                     format: wgpu::VertexFormat::Float32x3,
                 },
@@ -63,15 +71,13 @@ struct State<'a> {
     window: &'a Window,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
-    num_verts: u32,
+    index_buffer: wgpu::Buffer,
 }
 
 impl<'a> State<'a> {
     // Creating some of the wgpu types requires async code
     async fn new(window: &'a Window) -> State<'a> {
         let size = window.inner_size();
-
-        let num_verts = VERTS.len() as u32;
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
@@ -95,7 +101,11 @@ impl<'a> State<'a> {
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    required_features: wgpu::Features::empty(),
+                    required_features: if cfg!(target_arch = "wasm32") {
+                        wgpu::Features::empty()
+                    } else {
+                        wgpu::Features::POLYGON_MODE_POINT | wgpu::Features::POLYGON_MODE_LINE
+                    },
                     required_limits: if cfg!(target_arch = "wasm32") {
                         wgpu::Limits::downlevel_webgl2_defaults()
                     } else {
@@ -136,6 +146,12 @@ impl<'a> State<'a> {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(VERTS),
             usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(INDICES),
+            usage: wgpu::BufferUsages::INDEX,
         });
 
         let render_pipeline_layout =
@@ -199,7 +215,7 @@ impl<'a> State<'a> {
             window,
             render_pipeline,
             vertex_buffer,
-            num_verts,
+            index_buffer,
         }
     }
 
@@ -236,9 +252,9 @@ impl<'a> State<'a> {
             });
 
         let clear_color = wgpu::Color {
-            r: 0.1,
+            r: 0.15,
             g: 0.2,
-            b: 0.3,
+            b: 0.6,
             a: 1.0,
         };
         {
@@ -257,11 +273,15 @@ impl<'a> State<'a> {
                 occlusion_query_set: None,
             });
 
+            // Draw to pipeline
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.draw(0..self.num_verts, 0..1);
+            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            //render_pass.draw(0..(VERTS.len() as u32), 0..1);
+            render_pass.draw_indexed(0..(INDICES.len() as u32), 0, 0..1);
         }
 
+        // Submit our queue and then render it
         self.queue.submit(iter::once(encoder.finish()));
         output.present();
         Ok(())
@@ -270,6 +290,7 @@ impl<'a> State<'a> {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 pub async fn run() {
+    // Create env logger
     cfg_if::cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
             std::panic::set_hook(Box::new(console_error_panic_hook::hook));
@@ -287,12 +308,12 @@ pub async fn run() {
     window.set_max_inner_size(Some(max_size));
     window.set_min_inner_size(Some(min_size));
 
+    // WASM canvas element implementation
     #[cfg(target_arch = "wasm32")]
     {
         // Winit prevents sizing with CSS, so we have to set
         // the size manually when on web.
         // use winit::dpi::PhysicalSize;
-
         use winit::platform::web::WindowExtWebSys;
         web_sys::window()
             .and_then(|win| win.document())
@@ -306,10 +327,10 @@ pub async fn run() {
         let _ = window.request_inner_size(min_size);
     }
 
+    // Create state
     let mut state = State::new(&window).await;
     let mut surface_configured = false;
 
-    // #[allow(unused_must_use)]
     let _ = event_loop.run(move |event, control_flow| match event {
         Event::WindowEvent {
             ref event,

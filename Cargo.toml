@@ -1,7 +1,7 @@
 [package]
 name = "wgpuproj1"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [[bin]]
 name = "wgpuapp"
@@ -18,7 +18,9 @@ wgpu = "24.0"
 winit = { version = "0.29", features = ["rwh_05"] }
 pollster = "0.3"
 bytemuck = { version = "1.16", features = ["derive"] }
+glam = { version = "0.30", features = ["bytemuck"] }
 
+# WASM specific stuff
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1.6"
 console_log = "1.0"
@@ -30,3 +32,11 @@ web-sys = { version = "0.3", features = [
     "Window",
     "Element",
 ]}
+
+# Size optimizations
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 2
+panic = "abort"
+strip = "symbols"
