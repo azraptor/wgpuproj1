@@ -1,4 +1,4 @@
-use glam::Vec3;
+use glam::Vec4;
 use std::iter;
 use wgpu::util::DeviceExt;
 use winit::{
@@ -15,31 +15,33 @@ use wasm_bindgen::prelude::*;
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vert {
-    pos: Vec3,
-    color: Vec3,
+    pos: Vec4,
+    color: Vec4,
 }
 
 const VERTS: &[Vert] = &[
     Vert {
-        pos: Vec3::new(0.5, 0.5, 0.0),
-        color: Vec3::new(1.0, 0.0, 0.0),
+        pos: Vec4::new(0.5, 0.5, 0.0, 1.0),
+        color: Vec4::new(1.0, 0.0, 0.0, 1.0),
     },
     Vert {
-        pos: Vec3::new(0.5, -0.5, 0.0),
-        color: Vec3::new(0.0, 0.0, 1.0),
+        pos: Vec4::new(0.5, -0.5, 0.0, 1.0),
+        color: Vec4::new(0.0, 0.0, 1.0, 1.0),
     },
     Vert {
-        pos: Vec3::new(-0.5, -0.5, 0.0),
-        color: Vec3::new(0.0, 1.0, 0.0),
+        pos: Vec4::new(-0.5, -0.5, 0.0, 1.0),
+        color: Vec4::new(0.0, 1.0, 0.0, 1.0),
     },
     Vert {
-        pos: Vec3::new(-0.5, 0.5, 0.0),
-        color: Vec3::new(1.0, 1.0, 0.0),
+        pos: Vec4::new(-0.5, 0.5, 0.0, 1.0),
+        color: Vec4::new(1.0, 1.0, 0.0, 1.0),
     },
 ];
 
-//const INDICES: &[u16] = &[0, 1, 3, 1, 2, 3];
+// &[0, 1, 3, 1, 2, 3] cw order
 const INDICES: &[u16] = &[3, 2, 1, 3, 1, 0];
+
+const WGSL_CODE: wgpu::ShaderModuleDescriptor = wgpu::include_wgsl!("shaders/simple.wgsl");
 
 impl Vert {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -50,12 +52,12 @@ impl Vert {
                 wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
+                    format: wgpu::VertexFormat::Float32x4,
                 },
                 wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<Vec3>() as wgpu::BufferAddress,
+                    offset: std::mem::size_of::<Vec4>() as wgpu::BufferAddress,
                     shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x3,
+                    format: wgpu::VertexFormat::Float32x4,
                 },
             ],
         }
@@ -98,13 +100,16 @@ impl<'a> State<'a> {
             .await
             .unwrap();
 
+        // Render device
+        let desktop_features =
+            wgpu::Features::POLYGON_MODE_POINT | wgpu::Features::POLYGON_MODE_LINE;
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     required_features: if cfg!(target_arch = "wasm32") {
                         wgpu::Features::empty()
                     } else {
-                        wgpu::Features::POLYGON_MODE_POINT | wgpu::Features::POLYGON_MODE_LINE
+                        desktop_features
                     },
                     required_limits: if cfg!(target_arch = "wasm32") {
                         wgpu::Limits::downlevel_webgl2_defaults()
@@ -119,6 +124,7 @@ impl<'a> State<'a> {
             .await
             .unwrap();
 
+        // Surface configuration
         let surface_caps = surface.get_capabilities(&adapter);
 
         let surface_format = surface_caps
@@ -140,7 +146,7 @@ impl<'a> State<'a> {
         };
 
         // Shader and render pipeline
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+        let shader = device.create_shader_module(WGSL_CODE);
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
@@ -173,7 +179,16 @@ impl<'a> State<'a> {
             entry_point: Some("fs_main"),
             targets: &[Some(wgpu::ColorTargetState {
                 format: config.format,
-                blend: Some(wgpu::BlendState::REPLACE),
+                //blend: Some(wgpu::BlendState::REPLACE),
+                // Set alpha mode so translucency works
+                blend: Some(wgpu::BlendState {
+                    color: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::SrcAlpha,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                    alpha: wgpu::BlendComponent::OVER,
+                }),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -252,9 +267,9 @@ impl<'a> State<'a> {
             });
 
         let clear_color = wgpu::Color {
-            r: 0.15,
+            r: 0.2,
             g: 0.2,
-            b: 0.6,
+            b: 0.2,
             a: 1.0,
         };
         {
@@ -307,6 +322,7 @@ pub async fn run() {
     let _ = window.request_inner_size(min_size);
     window.set_max_inner_size(Some(max_size));
     window.set_min_inner_size(Some(min_size));
+    window.set_title("WGPU Program");
 
     // WASM canvas element implementation
     #[cfg(target_arch = "wasm32")]
