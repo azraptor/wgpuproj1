@@ -19,6 +19,7 @@ winit = { version = "0.29", features = ["rwh_05"] }
 pollster = "0.3"
 bytemuck = { version = "1.16", features = ["derive"] }
 glam = { version = "0.30", features = ["bytemuck"] }
+image = { version = "0.24", default-features = false, features = ["png", "gif"] }
 
 # WASM specific stuff
 [target.'cfg(target_arch = "wasm32")'.dependencies]

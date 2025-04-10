@@ -6,11 +6,13 @@ use winit::{
     event::*,
     event_loop::EventLoop,
     keyboard::{KeyCode, PhysicalKey},
-    window::{Window, WindowBuilder},
+    window::{Icon, Window, WindowBuilder},
 };
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+
+const ICON_DATA: &[u8] = include_bytes!("res/icon.png");
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -319,10 +321,24 @@ pub async fn run() {
     let window = WindowBuilder::new().build(&event_loop).unwrap();
     let min_size = PhysicalSize::new(512, 512);
     let max_size = PhysicalSize::new(1024, 1024);
-    let _ = window.request_inner_size(min_size);
-    window.set_max_inner_size(Some(max_size));
-    window.set_min_inner_size(Some(min_size));
-    window.set_title("WGPU Program");
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = window.request_inner_size(min_size);
+        window.set_max_inner_size(Some(max_size));
+        window.set_min_inner_size(Some(min_size));
+        window.set_title("WGPU Program");
+
+        let (bytes, w, h) = {
+            let img = image::load_from_memory(ICON_DATA).unwrap().to_rgba8();
+            let (w, h) = img.dimensions();
+            let bytes = img.into_raw();
+            (bytes, w, h)
+        };
+
+        let win_icon = Icon::from_rgba(bytes, w, h).unwrap();
+        window.set_window_icon(Some(win_icon));
+    }
 
     // WASM canvas element implementation
     #[cfg(target_arch = "wasm32")]
