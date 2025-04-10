@@ -4,6 +4,12 @@ struct VertexInput {
     @location(2) tex_uv: vec2<f32>,
 };
 
+struct CameraUniform {
+    view_proj: mat4x4<f32>,
+};
+@group(1) @binding(0)
+var<uniform> camera: CameraUniform;
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
@@ -16,9 +22,13 @@ fn vs_main(
 ) -> VertexOutput {
     // Setup output struct
     var out: VertexOutput;
+
+    // Assign color and texture UVs
     out.color = model.color;
     out.tex_uv = model.tex_uv;
-    out.clip_position = model.position;
+
+    // Clip position adjusted by perspective
+    out.clip_position = camera.view_proj * model.position;
     return out;
 }
 
