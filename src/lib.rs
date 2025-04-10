@@ -1,4 +1,4 @@
-use glam::Vec4;
+//use glam::{Vec2, Vec4};
 use std::iter;
 use wgpu::util::DeviceExt;
 use winit::{
@@ -9,63 +9,24 @@ use winit::{
     window::{Icon, Window, WindowBuilder},
 };
 
+// Modules
+//mod camera;
+mod texture;
+mod vert;
+
+use crate::vert::{INDICES, VERTS, Vert};
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 const ICON_DATA: &[u8] = include_bytes!("res/icon.png");
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vert {
-    pos: Vec4,
-    color: Vec4,
-}
+// Shader code
+// TODO: Make it so that we can load this from a file instead
+// of just including it
+const WGSL_CODE: wgpu::ShaderModuleDescriptor = wgpu::include_wgsl!("shaders/simple_texture.wgsl");
 
-const VERTS: &[Vert] = &[
-    Vert {
-        pos: Vec4::new(0.5, 0.5, 0.0, 1.0),
-        color: Vec4::new(1.0, 0.0, 0.0, 1.0),
-    },
-    Vert {
-        pos: Vec4::new(0.5, -0.5, 0.0, 1.0),
-        color: Vec4::new(0.0, 0.0, 1.0, 1.0),
-    },
-    Vert {
-        pos: Vec4::new(-0.5, -0.5, 0.0, 1.0),
-        color: Vec4::new(0.0, 1.0, 0.0, 1.0),
-    },
-    Vert {
-        pos: Vec4::new(-0.5, 0.5, 0.0, 1.0),
-        color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-    },
-];
-
-// &[0, 1, 3, 1, 2, 3] cw order
-const INDICES: &[u16] = &[3, 2, 1, 3, 1, 0];
-
-const WGSL_CODE: wgpu::ShaderModuleDescriptor = wgpu::include_wgsl!("shaders/simple.wgsl");
-
-impl Vert {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vert>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<Vec4>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-            ],
-        }
-    }
-}
-
+// Program state
 struct State<'a> {
     surface: wgpu::Surface<'a>,
     device: wgpu::Device,
@@ -76,6 +37,8 @@ struct State<'a> {
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
+    diffuse_bind_group: wgpu::BindGroup,
+    //diffuse_texture: texture::Texture,
 }
 
 impl<'a> State<'a> {
@@ -92,7 +55,6 @@ impl<'a> State<'a> {
         });
 
         let surface = instance.create_surface(window).unwrap();
-
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -128,7 +90,6 @@ impl<'a> State<'a> {
 
         // Surface configuration
         let surface_caps = surface.get_capabilities(&adapter);
-
         let surface_format = surface_caps
             .formats
             .iter()
@@ -147,9 +108,53 @@ impl<'a> State<'a> {
             desired_maximum_frame_latency: 2,
         };
 
+        // Texture
+        let tex1_bytes = include_bytes!("res/texture_test_1.png");
+        let img: image::DynamicImage = image::load_from_memory(tex1_bytes).unwrap();
+        let diffuse_texture =
+            texture::Texture::from_image(&device, &queue, &img, Some("diffuse_texture")).unwrap();
+
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+                label: Some("texture_bind_group_layout"),
+            });
+        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                },
+            ],
+            label: Some("diffuse_bind_group"),
+        });
+
         // Shader and render pipeline
         let shader = device.create_shader_module(WGSL_CODE);
 
+        // Buffers
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(VERTS),
@@ -165,7 +170,7 @@ impl<'a> State<'a> {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[],
+                bind_group_layouts: &[&texture_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -233,6 +238,8 @@ impl<'a> State<'a> {
             render_pipeline,
             vertex_buffer,
             index_buffer,
+            diffuse_bind_group,
+            //diffuse_texture,
         }
     }
 
@@ -249,7 +256,8 @@ impl<'a> State<'a> {
         }
     }
 
-    fn input(&mut self, event: &WindowEvent) -> bool {
+    // TODO: Implement this in some form
+    fn input(&mut self, _event: &WindowEvent) -> bool {
         false
     }
 
@@ -292,6 +300,7 @@ impl<'a> State<'a> {
 
             // Draw to pipeline
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             //render_pass.draw(0..(VERTS.len() as u32), 0..1);
