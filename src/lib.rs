@@ -5,7 +5,7 @@ use winit::{
     event::*,
     event_loop::EventLoop,
     keyboard::{KeyCode, PhysicalKey},
-    window::{Icon, Window, WindowBuilder},
+    window::{Window, WindowBuilder},
 };
 
 // Modules
@@ -13,13 +13,12 @@ mod camera;
 mod texture;
 mod vert;
 
-use crate::camera::{Camera, CameraUniform};
+use crate::camera::{Camera, CameraController, CameraUniform};
+use crate::texture::Texture;
 use crate::vert::{INDICES, VERTS, Vert};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
-
-const ICON_DATA: &[u8] = include_bytes!("res/icon.png");
 
 // Shader code
 // TODO: Make it so that we can load this from a file instead
@@ -28,6 +27,7 @@ const WGSL_CODE: wgpu::ShaderModuleDescriptor = wgpu::include_wgsl!("shaders/sim
 
 // Program state
 struct State<'a> {
+    // General structs needed for WGPU to work
     surface: wgpu::Surface<'a>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -35,13 +35,16 @@ struct State<'a> {
     size: winit::dpi::PhysicalSize<u32>,
     window: &'a Window,
     render_pipeline: wgpu::RenderPipeline,
+    // Buffers & Bindgroups
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     diffuse_bind_group: wgpu::BindGroup,
+    // Camera
     camera: Camera,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    camera_controller: CameraController,
 }
 
 impl<'a> State<'a> {
@@ -105,7 +108,7 @@ impl<'a> State<'a> {
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode: surface_caps.present_modes[0],
+            present_mode: wgpu::PresentMode::AutoVsync, //surface_caps.present_modes[0],
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: Vec::new(),
             desired_maximum_frame_latency: 2,
@@ -115,7 +118,7 @@ impl<'a> State<'a> {
         let tex1_bytes = include_bytes!("res/texture_test_1.png");
         let img: image::DynamicImage = image::load_from_memory(tex1_bytes).unwrap();
         let diffuse_texture =
-            texture::Texture::from_image(&device, &queue, &img, Some("diffuse_texture")).unwrap();
+            Texture::from_image(&device, &queue, &img, Some("diffuse_texture")).unwrap();
 
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -201,6 +204,8 @@ impl<'a> State<'a> {
             }],
             label: Some("camera_bind_group"),
         });
+
+        let camera_controller = CameraController::new(0.02);
 
         // Shader and render pipeline
         let shader = device.create_shader_module(WGSL_CODE);
@@ -294,6 +299,7 @@ impl<'a> State<'a> {
             camera_uniform,
             camera_buffer,
             camera_bind_group,
+            camera_controller,
         }
     }
 
@@ -310,12 +316,21 @@ impl<'a> State<'a> {
         }
     }
 
-    // TODO: Implement this in some form
-    fn input(&mut self, _event: &WindowEvent) -> bool {
-        false
+    #[allow(dead_code)]
+    fn input(&mut self, event: &WindowEvent) -> bool {
+        //false
+        self.camera_controller.process_events(event)
     }
 
-    fn update(&mut self) {}
+    fn update(&mut self) {
+        self.camera_controller.update_camera(&mut self.camera);
+        self.camera_uniform.update_view_proj(&self.camera);
+        self.queue.write_buffer(
+            &self.camera_buffer,
+            0,
+            bytemuck::cast_slice(&[self.camera_uniform]),
+        );
+    }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
@@ -381,17 +396,22 @@ pub async fn run() {
         }
     }
 
+    // Create event loop and window
     let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
-    let min_size = PhysicalSize::new(512, 512);
-    let max_size = PhysicalSize::new(1024, 1024);
 
     #[cfg(not(target_arch = "wasm32"))]
     {
+        // Configuration specific to desktop
+        use winit::window::Icon;
+        let max_size = PhysicalSize::new(1024, 1024);
+        let min_size = PhysicalSize::new(512, 512);
         let _ = window.request_inner_size(min_size);
         window.set_max_inner_size(Some(max_size));
         window.set_min_inner_size(Some(min_size));
         window.set_title("WGPU Program");
+
+        const ICON_DATA: &[u8] = include_bytes!("res/icon.png");
 
         let (bytes, w, h) = {
             let img = image::load_from_memory(ICON_DATA).unwrap().to_rgba8();
@@ -407,9 +427,8 @@ pub async fn run() {
     // WASM canvas element implementation
     #[cfg(target_arch = "wasm32")]
     {
-        // Winit prevents sizing with CSS, so we have to set
-        // the size manually when on web.
-        // use winit::dpi::PhysicalSize;
+        // Setting size manually to work around winit
+        // copied from wgpu tutorial
         use winit::platform::web::WindowExtWebSys;
         web_sys::window()
             .and_then(|win| win.document())
@@ -420,7 +439,7 @@ pub async fn run() {
                 Some(())
             })
             .expect("Couldn't append canvas to document body.");
-        let _ = window.request_inner_size(min_size);
+        let _ = window.request_inner_size(PhysicalSize::new(512, 512));
     }
 
     // Create state

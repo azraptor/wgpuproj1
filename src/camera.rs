@@ -1,6 +1,9 @@
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
+use winit::event::{ElementState, KeyEvent, WindowEvent};
+use winit::keyboard::{KeyCode, PhysicalKey};
+
 pub struct Camera {
     pub eye: Vec3,
     pub target: Vec3,
@@ -15,6 +18,14 @@ pub struct Camera {
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct CameraUniform {
     pub view_proj: [[f32; 4]; 4],
+}
+
+pub struct CameraController {
+    pub speed: f32,
+    pub up_pressed: bool,
+    pub down_pressed: bool,
+    pub left_pressed: bool,
+    pub right_pressed: bool,
 }
 
 impl Camera {
@@ -36,5 +47,80 @@ impl CameraUniform {
 
     pub fn update_view_proj(&mut self, camera: &Camera) {
         self.view_proj = camera.view_proj_matrix().to_cols_array_2d();
+    }
+}
+
+impl CameraController {
+    pub fn new(speed: f32) -> Self {
+        Self {
+            speed,
+            up_pressed: false,
+            down_pressed: false,
+            left_pressed: false,
+            right_pressed: false,
+        }
+    }
+
+    pub fn process_events(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        state,
+                        physical_key: PhysicalKey::Code(keycode),
+                        ..
+                    },
+                ..
+            } => {
+                let pressed = *state == ElementState::Pressed;
+                match keycode {
+                    KeyCode::KeyW | KeyCode::ArrowUp => {
+                        self.up_pressed = pressed;
+                        true
+                    }
+                    KeyCode::KeyA | KeyCode::ArrowLeft => {
+                        self.left_pressed = pressed;
+                        true
+                    }
+                    KeyCode::KeyS | KeyCode::ArrowDown => {
+                        self.down_pressed = pressed;
+                        true
+                    }
+                    KeyCode::KeyD | KeyCode::ArrowRight => {
+                        self.right_pressed = pressed;
+                        true
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
+    pub fn update_camera(&self, camera: &mut Camera) {
+        let forward = camera.target - camera.eye;
+        let forward_norm = forward.normalize();
+        let forward_mag = forward.length();
+
+        // Forward backward movement
+        if self.up_pressed && forward_mag > self.speed {
+            camera.eye += forward_norm * self.speed;
+        }
+        if self.down_pressed {
+            camera.eye -= forward_norm * self.speed;
+        }
+
+        let right = forward_norm.cross(camera.up);
+
+        let forward = camera.target - camera.eye;
+        let forward_mag = forward.length();
+
+        // Left right rotation
+        if self.right_pressed {
+            camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
+        }
+        if self.left_pressed {
+            camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
+        }
     }
 }
