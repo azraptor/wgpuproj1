@@ -1,11 +1,13 @@
-use std::iter;
+use pollster::FutureExt;
+use std::{iter, sync::Arc};
 use wgpu::util::DeviceExt;
 use winit::{
+    application::ApplicationHandler,
     dpi::PhysicalSize,
     event::*,
-    event_loop::EventLoop,
-    keyboard::{KeyCode, PhysicalKey},
-    window::{Window, WindowBuilder},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::PhysicalKey,
+    window::{Window, WindowAttributes, WindowId},
 };
 
 // Modules
@@ -25,15 +27,150 @@ use wasm_bindgen::prelude::*;
 // of just including it
 const WGSL_CODE: wgpu::ShaderModuleDescriptor = wgpu::include_wgsl!("shaders/simple_texture.wgsl");
 
+struct App {
+    state: Option<State>,
+}
+
+impl App {
+    pub fn new() -> Self {
+        Self { state: None }
+    }
+}
+
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        // Base window size
+        let size = PhysicalSize::new(512, 512);
+        // Base window attributes
+        let attrib = WindowAttributes::default()
+            .with_inner_size(size)
+            .with_title("WGPU Program");
+
+        // Create the window
+        let window = event_loop.create_window(attrib).unwrap();
+
+        log::warn!("{:?}", size);
+        log::warn!("{:?}", window.inner_size());
+
+        if window.inner_size().width == 0 {
+            log::warn!("I FUCKING LOVE WASM!");
+            let _ = window.request_inner_size(size);
+        }
+
+        // WASM canvas element implementation
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Setting size manually to work around winit
+            // copied from wgpu tutorial
+            use winit::platform::web::WindowExtWebSys;
+            web_sys::window()
+                .and_then(|win| win.document())
+                .and_then(|doc| {
+                    let dst = doc.get_element_by_id("game")?;
+                    let canvas = web_sys::Element::from(window.canvas()?);
+                    dst.append_child(&canvas).ok()?;
+                    Some(())
+                })
+                .expect("Couldn't append canvas to document body.");
+        }
+
+        // Configuration specific to desktop
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use winit::window::Icon;
+            let max_size = PhysicalSize::new(1024, 1024);
+            let min_size = size;
+
+            const ICON_DATA: &[u8] = include_bytes!("res/icon.png");
+
+            let (bytes, w, h) = {
+                let img = image::load_from_memory(ICON_DATA).unwrap().to_rgba8();
+                let (w, h) = img.dimensions();
+                let bytes = img.into_raw();
+                (bytes, w, h)
+            };
+
+            let win_icon = Icon::from_rgba(bytes, w, h).unwrap();
+
+            // Set stuff that only matters for desktops
+            window.set_max_inner_size(Some(max_size));
+            window.set_min_inner_size(Some(min_size));
+            window.set_window_icon(Some(win_icon));
+        }
+
+        self.state = Some(State::new(window).block_on());
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if let Some(state) = self.state.as_mut() {
+            if id != state.window.id() {
+                return;
+            }
+        }
+
+        // Event handling
+        match event {
+            WindowEvent::CloseRequested => {
+                event_loop.exit();
+            }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        state,
+                        physical_key: PhysicalKey::Code(keycode),
+                        ..
+                    },
+                ..
+            } => {
+                if let Some(prog_state) = self.state.as_mut() {
+                    log::info!("{:?} {}", keycode, state.is_pressed());
+                    prog_state
+                        .camera_controller
+                        .process_events(state.is_pressed(), keycode);
+                }
+            }
+            WindowEvent::Resized(physical_size) => {
+                if let Some(state) = self.state.as_mut() {
+                    state.resize(physical_size);
+                }
+            }
+            WindowEvent::RedrawRequested => {
+                // Redraw the window and gfx
+                if let Some(state) = self.state.as_mut() {
+                    state.window.request_redraw();
+
+                    state.update();
+
+                    match state.render() {
+                        Ok(_) => {}
+
+                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                            state.resize(state.size)
+                        }
+                        Err(wgpu::SurfaceError::OutOfMemory | wgpu::SurfaceError::Other) => {
+                            log::error!("Out of memory!");
+                            event_loop.exit();
+                        }
+                        Err(wgpu::SurfaceError::Timeout) => {
+                            log::warn!("Surface timeout");
+                        }
+                    }
+                }
+            }
+            _ => (),
+        }
+    }
+}
+
 // Program state
-struct State<'a> {
-    // General structs needed for WGPU to work
-    surface: wgpu::Surface<'a>,
+struct State {
+    // General fields needed for WGPU to work
+    surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
-    window: &'a Window,
+    window: Arc<Window>,
     render_pipeline: wgpu::RenderPipeline,
     // Buffers & Bindgroups
     vertex_buffer: wgpu::Buffer,
@@ -47,10 +184,11 @@ struct State<'a> {
     camera_controller: CameraController,
 }
 
-impl<'a> State<'a> {
+impl State {
     // Creating some of the wgpu types requires async code
-    async fn new(window: &'a Window) -> State<'a> {
+    async fn new(window: Window) -> State {
         let size = window.inner_size();
+        let window = Arc::new(window);
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
@@ -60,7 +198,7 @@ impl<'a> State<'a> {
             ..Default::default()
         });
 
-        let surface = instance.create_surface(window).unwrap();
+        let surface = instance.create_surface(window.clone()).unwrap();
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -114,6 +252,8 @@ impl<'a> State<'a> {
             desired_maximum_frame_latency: 2,
         };
 
+        log::warn!("{} {}", config.width, config.height);
+
         // Texture
         let tex1_bytes = include_bytes!("res/texture_test_1.png");
         let img: image::DynamicImage = image::load_from_memory(tex1_bytes).unwrap();
@@ -159,19 +299,7 @@ impl<'a> State<'a> {
         });
 
         // Camera
-        use glam::Vec3;
-        let camera = Camera {
-            // Alex, do not forget that this is right handed
-            // meaning z goes away and x goes right
-            eye: Vec3::new(0.0, 0.0, 2.0), // wgpu tutorial sets these as 1.0, 2.0
-            target: Vec3::new(0.0, 0.0, 0.0),
-            up: Vec3::new(0.0, 1.0, 0.0), // Y-up
-            aspect: config.width as f32 / config.height as f32,
-            fovy: 45.0,
-            znear: 0.1,
-            zfar: 100.0,
-        };
-
+        let camera = Camera::new(config.width as f32 / config.height as f32);
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
 
@@ -242,7 +370,6 @@ impl<'a> State<'a> {
             entry_point: Some("fs_main"),
             targets: &[Some(wgpu::ColorTargetState {
                 format: config.format,
-                //blend: Some(wgpu::BlendState::REPLACE),
                 // Set alpha mode so translucency works
                 blend: Some(wgpu::BlendState {
                     color: wgpu::BlendComponent {
@@ -303,10 +430,6 @@ impl<'a> State<'a> {
         }
     }
 
-    pub fn window(&self) -> &Window {
-        &self.window
-    }
-
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
@@ -314,12 +437,6 @@ impl<'a> State<'a> {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
         }
-    }
-
-    #[allow(dead_code)]
-    fn input(&mut self, event: &WindowEvent) -> bool {
-        //false
-        self.camera_controller.process_events(event)
     }
 
     fn update(&mut self) {
@@ -373,7 +490,6 @@ impl<'a> State<'a> {
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            //render_pass.draw(0..(VERTS.len() as u32), 0..1);
             render_pass.draw_indexed(0..(INDICES.len() as u32), 0, 0..1);
         }
 
@@ -387,114 +503,30 @@ impl<'a> State<'a> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 pub async fn run() {
     // Create env logger
-    cfg_if::cfg_if! {
-        if #[cfg(target_arch = "wasm32")] {
-            std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-            console_log::init_with_level(log::Level::Warn).expect("Couldn't initialize logger");
-        } else {
-            env_logger::init();
-        }
-    }
-
-    // Create event loop and window
-    let event_loop = EventLoop::new().unwrap();
-    let window = WindowBuilder::new().build(&event_loop).unwrap();
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        // Configuration specific to desktop
-        use winit::window::Icon;
-        let max_size = PhysicalSize::new(1024, 1024);
-        let min_size = PhysicalSize::new(512, 512);
-        let _ = window.request_inner_size(min_size);
-        window.set_max_inner_size(Some(max_size));
-        window.set_min_inner_size(Some(min_size));
-        window.set_title("WGPU Program");
-
-        const ICON_DATA: &[u8] = include_bytes!("res/icon.png");
-
-        let (bytes, w, h) = {
-            let img = image::load_from_memory(ICON_DATA).unwrap().to_rgba8();
-            let (w, h) = img.dimensions();
-            let bytes = img.into_raw();
-            (bytes, w, h)
-        };
-
-        let win_icon = Icon::from_rgba(bytes, w, h).unwrap();
-        window.set_window_icon(Some(win_icon));
-    }
-
-    // WASM canvas element implementation
     #[cfg(target_arch = "wasm32")]
     {
-        // Setting size manually to work around winit
-        // copied from wgpu tutorial
-        use winit::platform::web::WindowExtWebSys;
-        web_sys::window()
-            .and_then(|win| win.document())
-            .and_then(|doc| {
-                let dst = doc.get_element_by_id("game")?;
-                let canvas = web_sys::Element::from(window.canvas()?);
-                dst.append_child(&canvas).ok()?;
-                Some(())
-            })
-            .expect("Couldn't append canvas to document body.");
-        let _ = window.request_inner_size(PhysicalSize::new(512, 512));
+        std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+        console_log::init_with_level(log::Level::Warn).expect("Couldn't initialize logger");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        env_logger::init();
     }
 
-    // Create state
-    let mut state = State::new(&window).await;
-    let mut surface_configured = false;
+    // Create event loop
+    let event_loop = EventLoop::new().unwrap();
+    event_loop.set_control_flow(ControlFlow::Poll);
 
-    let _ = event_loop.run(move |event, control_flow| match event {
-        Event::WindowEvent {
-            ref event,
-            window_id,
-        } if window_id == state.window.id() => {
-            if !state.input(event) {
-                let _ = match event {
-                    WindowEvent::CloseRequested
-                    | WindowEvent::KeyboardInput {
-                        event:
-                            KeyEvent {
-                                state: ElementState::Pressed,
-                                physical_key: PhysicalKey::Code(KeyCode::Escape),
-                                ..
-                            },
-                        ..
-                    } => control_flow.exit(),
-                    WindowEvent::Resized(physical_size) => {
-                        surface_configured = true;
-                        state.resize(*physical_size);
-                    }
-                    WindowEvent::RedrawRequested => {
-                        state.window().request_redraw();
+    // Running our app window + wgpu context
+    #[allow(unused_mut)]
+    let mut app = App::new();
 
-                        if !surface_configured {
-                            return;
-                        }
+    #[cfg(not(target_arch = "wasm32"))]
+    event_loop.run_app(&mut app).unwrap();
 
-                        state.update();
-
-                        let _ = match state.render() {
-                            Ok(_) => {}
-
-                            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                                state.resize(state.size)
-                            }
-                            Err(wgpu::SurfaceError::OutOfMemory | wgpu::SurfaceError::Other) => {
-                                log::error!("Out of memory!");
-                                control_flow.exit();
-                            }
-                            Err(wgpu::SurfaceError::Timeout) => {
-                                log::warn!("Surface timeout");
-                            }
-                        };
-                    }
-                    _ => {}
-                };
-            }
-        }
-        _ => {}
-    });
+    #[cfg(target_arch = "wasm32")]
+    {
+        use winit::platform::web::EventLoopExtWebSys;
+        event_loop.spawn_app(app);
+    }
 }
