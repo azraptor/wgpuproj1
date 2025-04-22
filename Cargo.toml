@@ -7,8 +7,8 @@ edition = "2024"
 name = "wgpuapp"
 path = "src/main.rs"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
+# [lib]
+# crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 env_logger = "0.11.5"

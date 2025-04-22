@@ -54,7 +54,7 @@ impl Camera {
         let view = Mat4::look_at_rh(self.eye, self.target, self.up);
         let proj = Mat4::perspective_rh(self.fovy.to_radians(), self.aspect, self.znear, self.zfar);
 
-        return proj * view;
+        proj * view
     }
 }
 

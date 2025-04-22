@@ -20,8 +20,8 @@ impl Texture {
         // Weird webgpu thing, apparently textures
         // need a 3D extent that specifies a depth of 1
         let tex_extent = wgpu::Extent3d {
-            width: width,
-            height: height,
+            width,
+            height,
             depth_or_array_layers: 1,
         };
 
@@ -71,5 +71,29 @@ impl Texture {
             view,
             sampler,
         })
+    }
+
+    pub fn bind_desc<'a>(&self, label: Option<&'a str>) -> wgpu::BindGroupLayoutDescriptor<'a> {
+        wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+            label,
+        }
     }
 }
