@@ -1,17 +1,25 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WGPU WASM</title>
-<style>
-canvas {
-    background-color: black;
-}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WGPU WASM</title>
+    <style>
+    canvas#game {
+        outline: 5px solid #f00; 
+        border: none;
+        margin: 0 auto;
+        width: 512px;
+        height: 512px;
+        max-width: 1024px;
+        max-height: 1024px;
+        display: block;
+    }
+    </style>
 </head>
 <body>
-<div id="game">
-</div>
+    <div>
+        <canvas id="game" width="512" height="512">Canvas not supported!</canvas>
+    </div>
 </body>
 </html>

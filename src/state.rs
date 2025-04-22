@@ -1,6 +1,6 @@
 use std::{iter, sync::Arc};
 use wgpu::util::DeviceExt;
-use winit::window::Window;
+use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::camera::{Camera, CameraController, CameraUniform};
 use crate::texture::Texture;
@@ -82,10 +82,6 @@ impl State {
             .await
             .unwrap();
 
-        // Surface configuration
-
-        // log::warn!("{} {}", config.width, config.height);
-
         // Texture
         let tex1_bytes = include_bytes!("res/texture_test_1.png");
         let img: image::DynamicImage = image::load_from_memory(tex1_bytes).unwrap();
@@ -122,20 +118,7 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("camera_bind_group_layout"),
-            });
+        let camera_bind_group_layout = device.create_bind_group_layout(&camera_uniform.bind_desc());
 
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &camera_bind_group_layout,
@@ -255,10 +238,16 @@ impl State {
         state
     }
 
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+    pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
             self.config_surface();
+
+            self.camera = Camera::new(self.size.width as f32 / self.size.height as f32);
+            self.camera_uniform.update_view_proj(&self.camera);
+
+            // Fix aspect ratio
+            self.camera.aspect = self.size.width as f32 / self.size.height as f32;
         }
     }
 
@@ -275,9 +264,10 @@ impl State {
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
 
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let view = output.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.surface_format.add_srgb_suffix()),
+            ..Default::default()
+        });
 
         let mut encoder = self
             .device
@@ -288,7 +278,7 @@ impl State {
         let clear_color = wgpu::Color {
             r: 0.2,
             g: 0.2,
-            b: 0.2,
+            b: 0.5,
             a: 1.0,
         };
         {

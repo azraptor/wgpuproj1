@@ -68,6 +68,22 @@ impl CameraUniform {
     pub fn update_view_proj(&mut self, camera: &Camera) {
         self.view_proj = (OPENGL_TO_WGPU_MATRIX * camera.view_proj_matrix()).to_cols_array_2d();
     }
+
+    pub fn bind_desc<'a>(&self) -> wgpu::BindGroupLayoutDescriptor<'a> {
+        wgpu::BindGroupLayoutDescriptor {
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            label: Some("camera_bind_group_layout"),
+        }
+    }
 }
 
 impl CameraController {
