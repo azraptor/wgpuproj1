@@ -3,8 +3,9 @@ use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::camera::{Camera, CameraController, CameraUniform};
+use crate::model::Model;
 use crate::texture::Texture;
-use crate::vert::{INDICES, VERTS, Vert};
+use crate::vert::Vert;
 // Shader code
 // TODO: Make it so that we can load this from a file instead
 // of just including it
@@ -32,6 +33,7 @@ pub struct State {
     pub camera_buffer: wgpu::Buffer,
     pub camera_bind_group: wgpu::BindGroup,
     pub camera_controller: CameraController,
+    pub model: Model,
 }
 
 impl State {
@@ -134,16 +136,18 @@ impl State {
         // Shader and render pipeline
         let shader = device.create_shader_module(WGSL_CODE);
 
+        let model = Model::cube(0.5);
+
         // Buffers
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTS),
+            contents: bytemuck::cast_slice(&model.verts), //VERTS),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(INDICES),
+            contents: bytemuck::cast_slice(&model.indicies), //INDICES),
             usage: wgpu::BufferUsages::INDEX,
         });
 
@@ -231,6 +235,7 @@ impl State {
             camera_buffer,
             camera_bind_group,
             camera_controller,
+            model,
         };
 
         state.config_surface();
@@ -297,13 +302,16 @@ impl State {
                 occlusion_query_set: None,
             });
 
+            let index_len = self.model.indicies.len() as u32;
+            let index_amt = 0..index_len; //(INDICES.len() as u32);
+
             // Draw to pipeline
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..(INDICES.len() as u32), 0, 0..1);
+            render_pass.draw_indexed(index_amt, 0, 0..1);
         }
 
         // Submit our queue and then render it

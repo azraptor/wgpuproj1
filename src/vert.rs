@@ -5,7 +5,7 @@ use bytemuck::{Pod, Zeroable};
 pub struct Vert {
     // Unfortunately the Pod trait does not like
     // it when glam vecs of different sizes are together
-    // most likely it is due to the way that library places the actual
+    // most likely this is due to the way that library places the actual
     // floats into an 128 value
     pub pos: [f32; 4],        // Vec4
     pub color: [f32; 4],      // Vec4
@@ -13,6 +13,14 @@ pub struct Vert {
 }
 
 impl Vert {
+    pub fn new<U: Into<[f32; 4]>, V: Into<[f32; 2]>>(pos: U, color: U, uv: V) -> Self {
+        Self {
+            pos: pos.into(),
+            color: color.into(),
+            tex_coords: uv.into(),
+        }
+    }
+
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         // Return a buffer layout describing our verticies
         wgpu::VertexBufferLayout {
@@ -41,34 +49,3 @@ impl Vert {
         }
     }
 }
-
-// Constants below
-// TODO: Create functions to invalidate the
-// use of these
-
-// Square verts and indicies (Manually set)
-pub const VERTS: &[Vert] = &[
-    Vert {
-        pos: [0.5, 0.5, 0.0, 1.0],
-        color: [1.0, 0.0, 0.0, 1.0],
-        tex_coords: [1.0, 0.0],
-    },
-    Vert {
-        pos: [0.5, -0.5, 0.0, 1.0],
-        color: [0.0, 0.0, 1.0, 1.0],
-        tex_coords: [1.0, 1.0],
-    },
-    Vert {
-        pos: [-0.5, -0.5, 0.0, 1.0],
-        color: [0.0, 1.0, 0.0, 1.0],
-        tex_coords: [0.0, 1.0],
-    },
-    Vert {
-        pos: [-0.5, 0.5, 0.0, 1.0],
-        color: [1.0, 1.0, 0.0, 1.0],
-        tex_coords: [0.0, 0.0],
-    },
-];
-
-// &[0, 1, 3, 1, 2, 3] clockwise order
-pub const INDICES: &[u16] = &[3, 2, 1, 3, 1, 0]; // Counterclockwise order

@@ -11,6 +11,8 @@ use winit::{
 
 use crate::state::State;
 
+// These do not matter for webassembly but do for desktop
+// The canvas element serves as our "base" size of the "window"
 #[cfg(not(target_arch = "wasm32"))]
 const SIZE: PhysicalSize<u32> = PhysicalSize::new(512, 512);
 #[cfg(not(target_arch = "wasm32"))]
@@ -23,6 +25,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        // State will be created later on
         Self { state: None }
     }
 }
@@ -31,11 +34,11 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         // Base window attributes
         let attrib = win_attrib();
+
         // Create the window
         let window = event_loop.create_window(attrib).unwrap();
 
-        // WASM canvas element implementation
-
+        // Create state
         self.state = Some(State::new(window).block_on());
     }
 
@@ -60,9 +63,9 @@ impl ApplicationHandler for App {
                     },
                 ..
             } => {
-                if let Some(prog_state) = self.state.as_mut() {
-                    log::info!("{:?} {}", keycode, state.is_pressed());
-                    prog_state
+                // Keyboard input handling
+                if let Some(app_state) = self.state.as_mut() {
+                    app_state
                         .camera_controller
                         .process_events(state.is_pressed(), keycode);
                 }
@@ -76,7 +79,6 @@ impl ApplicationHandler for App {
                 // Redraw the window and gfx
                 if let Some(state) = self.state.as_mut() {
                     state.window.request_redraw();
-
                     state.update();
 
                     match state.render() {

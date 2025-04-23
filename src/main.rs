@@ -3,6 +3,7 @@ use winit::event_loop::{ControlFlow, EventLoop};
 // Modules
 mod app;
 mod camera;
+mod model;
 mod state;
 mod texture;
 mod vert;
