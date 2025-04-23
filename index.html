@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WGPU WASM</title>
     <style>
+    body {
+        background-color: #3365e4;
+        font-family: sans-serif;
+    }
     canvas#game {
         outline: 5px solid #f00; 
         border: none;
@@ -15,11 +19,36 @@
         max-height: 1024px;
         display: block;
     }
+    h2, p { text-align: center }
+    h2 {
+        font-size: 32pt;
+        color: #0ed;
+        animation: rave 3s linear 1.5s infinite;
+        text-shadow: 0px 0px 4px #000;
+    }
+    b { color: #fff; }
+    @keyframes rave {
+        0% { color: #0ed; }
+        15% { color: #2e0; }
+        20% { color: #18f571; }
+        30% { color: #f12; }
+        40% { color: #12f; }
+        50% { color: #123283; }
+        60% { color: #550744; }
+        70% { color: #0b0b63; }
+        80% { color: #3f0; }
+        90% { color: #01ab25; }
+        100% { color: #0e1; }
+    }
     </style>
 </head>
 <body>
     <div>
+        <h2>Textured WGPU Cube</h2>
         <canvas id="game" width="512" height="512">Canvas not supported!</canvas>
+        <p>Move around camera using <b>WASD</b> or arrow keys</p>
+        <p>Rotate camera using <b>IJKL</b></p>
+        <p>Press <b>R</b> to reset camera</p>
     </div>
 </body>
 </html>

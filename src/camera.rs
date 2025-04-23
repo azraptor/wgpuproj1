@@ -38,6 +38,7 @@ pub struct CameraController {
     pub k_pressed: bool,
     pub j_pressed: bool,
     pub l_pressed: bool,
+    pub reset_pressed: bool,
 }
 
 impl Camera {
@@ -52,6 +53,10 @@ impl Camera {
             znear: 0.1,
             zfar: 100.0,
         }
+    }
+    pub fn reset_view(&mut self) {
+        self.eye = Vec3::new(0.0, 0.0, 2.0);
+        self.target = Vec3::ZERO;
     }
     pub fn view_proj_matrix(&self) -> Mat4 {
         // Right hand perspective
@@ -102,6 +107,7 @@ impl CameraController {
             k_pressed: false,
             j_pressed: false,
             l_pressed: false,
+            reset_pressed: false,
         }
     }
 
@@ -139,12 +145,20 @@ impl CameraController {
                 self.l_pressed = pressed;
                 true
             }
+            KeyCode::KeyR => {
+                self.reset_pressed = pressed;
+                true
+            }
             _ => false,
         }
     }
 
     pub fn update_camera(&self, camera: &mut Camera) {
-        // Forward related vectors
+        if self.reset_pressed {
+            camera.reset_view();
+        }
+
+        // Forward direction related vectors
         let forward = camera.target - camera.eye;
         let forward_norm = forward.normalize();
         let forward_mag = forward.length();
@@ -162,7 +176,8 @@ impl CameraController {
         let up = forward_norm.cross(right).normalize();
 
         // Left and right panning
-        // This seems to work fine but I don't believe it is optimal
+        // Right now only moves the "eye" directly
+        // TODO: Make it so that it moves relative to the target, similar to moving forward
         if self.right_pressed {
             camera.eye.x += self.speed;
             camera.target.x += self.speed;
